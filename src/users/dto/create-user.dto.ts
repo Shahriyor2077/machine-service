@@ -1,3 +1,4 @@
+import { Role } from "../../../generated/prisma";
 
 export class CreateUserDto {
   full_name: string;
@@ -6,6 +7,6 @@ export class CreateUserDto {
   isActivated?: boolean;
   activationLink?: string;
   is_approved?: boolean; 
-  role: string;
-  refreshToken?: string;
+  role: Role="USER";
+  hashedRefreshToken?: string;
 }

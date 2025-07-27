@@ -24,17 +24,6 @@ export class MailService {
       },
     });
   }
-
-  async sendResetPasswordEmail(to: string, token: string) {
-    const resetLink = `http://localhost:3000/auth/reset-password?token=${token}`;
-
-    await this.mailerService.sendMail({
-      to,
-      subject: "Parolni tiklash",
-      template: "reset-password",
-      context: {
-        url: resetLink,
-      },
-    });
-  }
 }
+
+

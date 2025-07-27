@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { prismaService } from '../prisma/prisma.service';
@@ -6,20 +6,10 @@ import { prismaService } from '../prisma/prisma.service';
 @Injectable()
 export class UsersService {
   constructor(private readonly prismaService: prismaService) {}
-  async createUserByAdmin(dto: CreateUserDto) {
-    const user = await this.prismaService.user.create({
-      data: {
-        full_name: dto.full_name,
-        phone: dto.phone,
-        email: dto.email,
-        isActivated: dto.isActivated ?? false,
-        is_approved: dto.is_approved ?? false,
-        role: dto.role ?? "USER",
-        refreshToken: dto.refreshToken,
-        activationLink: dto.activationLink,
-      },
-    });
-    return user;
+
+  async create(createUserDto: CreateUserDto) {
+    const user=await this.prismaService.user.create({data:createUserDto});
+    return user
   }
 
   findAll() {
@@ -28,6 +18,21 @@ export class UsersService {
 
   findOne(id: number) {
     return this.prismaService.user.findUnique({ where: { id } });
+  }
+
+  async findByEmail(email: string) {
+    const user = await this.prismaService.user.findFirst({ where: { email } });
+    if (!user) throw new NotFoundException("Foydalanuvchi topilmadi");
+    return user;
+  }
+
+  async activateUser(link: string) {
+    const user = await this.prismaService.user.updateMany({
+      where: { activationLink: link },
+      data: { isActivated: true },
+    });
+    if (user.count === 0) throw new NotFoundException("Link noto‘g‘ri");
+    return { message: "Foydalanuvchi faollashtirildi" };
   }
 
   update(id: number, updateUserDto: UpdateUserDto) {
