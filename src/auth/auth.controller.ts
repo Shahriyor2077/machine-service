@@ -1,85 +1,60 @@
-// import { Body, Controller, Get, Param, Post, Res } from '@nestjs/common';
-// import { AuthService } from './auth.service';
-// import { CreateUserDto } from '../users/dto/create-user.dto';
-// import { SigninUserDto } from '../users/dto/signin-user.dto';
-// import { AdminLoginDto } from '../admin/dto/signin-admin.dto';
-
-// @Controller("auth")
-// export class AuthController {
-//   constructor(private readonly authService: AuthService) {}
-
-//   @Get("activate/:link")
-//   async activate(@Param("link") activationLink: string) {
-//     return this.authService.activate(activationLink);
-//   }
-
-//   // Admin uchun
-//   @Post('login')
-//   login(@Body('email') email: string) {
-//     return this.authService.login(email);
-//   }
-// }
-
-
-// src/auth/auth.controller.ts
 import {
-  Controller,
-  Post,
   Body,
+  Controller,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
-  Res,
+  Post,
   Req,
-} from '@nestjs/common';
-import { AuthService } from './auth.service';
-import { Response, Request } from 'express';
+  Res,
+  UnauthorizedException,
+  UseGuards,
+} from "@nestjs/common";
+import { AuthService } from "./auth.service";
 
-@Controller('auth')
+import { Response, Request } from "express";
+import { RefreshTokenGuard } from "./common/guards";
+import { GetCurrentUser, GetCurrentUserId } from "./common/decorators";
+import { ref } from "process";
+import { ResponseFields } from "./common/types";
+import { AuthGuard } from "@nestjs/passport";
+import { CreateUserDto } from "../users/dto";
+import { access } from "fs";
+import { AdminLoginDto } from "../admin/dto/signin-admin.dto";
+
+@Controller("auth")
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
-  @Post('register')
-  register(@Body() dto: { email: string; name: string }) {
-    return this.authService.registerUser(dto);
+  @Post("signup")
+  async signup(@Body() createUserDto: CreateUserDto) {
+    return this.authService.signup(createUserDto);
   }
 
-  @Get('activate/:link')
-  async activate(@Param('link') activationLink: string){
-    return this.authService.activateUser(activationLink);
+  @Get("activate/:link")
+  activate(@Param("link") link: string) {
+    return this.authService.activateUser(link);
   }
 
-  @Post('login')
-  async login(
-    @Body() body: { email: string },
-    @Res({ passthrough: true }) res: Response,
+  @Post("signin")
+  signin(@Body("email") email: string) {
+    return this.authService.signin(email);
+  }
+
+  //ADMIN uchun
+
+  @Post("admin/login")
+  async loginAdmin(@Body() dto: AdminLoginDto) {
+    return this.authService.adminLogin(dto);
+  }
+
+  // User login (faqat email va activationLink orqali)
+  @Post("user/login")
+  async userLogin(
+    @Body("email") email: string,
+    @Body("activationLink") activationLink: string
   ) {
-    const data = await this.authService.loginUser(body.email);
-    res.cookie('refreshToken', data.refreshToken, {
-      httpOnly: true,
-      maxAge: 30 * 24 * 60 * 60 * 1000,
-    });
-    return data;
-  }
-
-  @Post('logout')
-
-  async logout(@Res({passthrough:true}) res:Response){
-    res.clearCookie('refreshToken');
-    return {message:"Logout bajarildi"}
-  }
-
-
-  @Post('refresh')
-  async refresh(
-    @Req() req: Request,
-    @Res({ passthrough: true }) res: Response,
-  ) {
-    const token = req.cookies['refreshToken'];
-    const data = await this.authService.refresh(token);
-    res.cookie('refreshToken', data.refreshToken, {
-      httpOnly: true,
-      maxAge: 30 * 24 * 60 * 60 * 1000,
-    });
-    return data;
+    return this.authService.userLogin(email, activationLink);
   }
 }

@@ -1,128 +1,34 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
-import { prismaService } from '../prisma/prisma.service';
-import { JwtService } from '@nestjs/jwt';
-import { UsersService } from '../users/users.service';
-import { User } from '../../generated/prisma';
-import * as cookieParser from "cookie-parser";
-import * as bcrypt from 'bcrypt';
-import { CreateUserDto } from '../users/dto/create-user.dto';
-import { SigninUserDto } from '../users/dto/signin-user.dto';
-import { MailService } from '../mail/mail.service';
-import { CreateAdminDto } from '../admin/dto/create-admin.dto';
-import { AdminController } from '../admin/admin.controller';
-import { AdminLoginDto } from '../admin/dto/signin-admin.dto';
-import { v4 as uuidv4 } from 'uuid';
+import {
+  ConflictException,
+  Injectable,
+  UnauthorizedException,
+} from "@nestjs/common";
+import { prismaService } from "../prisma/prisma.service";
+import { JwtService } from "@nestjs/jwt";
+import { UsersService } from "../users/users.service";
+import { MailService } from "../mail/mail.service";
+import { Admin, User } from "../../generated/prisma";
+import { JwtPayload, ResponseFields, Tokens } from "./common/types";
+import { CreateUserDto } from "../users/dto";
+import { v4 as uuidv4 } from "uuid";
+import { SigninUserDto } from "../users/dto/signin-user.dto";
+import * as bcrypt from "bcrypt";
+import { AdminLoginDto } from "../admin/dto/signin-admin.dto";
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly prismaService: prismaService,
     private readonly jwtService: JwtService,
-    private readonly userService: UsersService,
+    private readonly usersService: UsersService,
     private readonly mailService: MailService
   ) {}
 
-  async registerUser(dto: { email: string; full_name: string }) {
-    const candidate = await this.prismaService.user.findFirst({
-      where: { email: dto.email },
-    });
-    if (candidate) {
-      throw new ConflictException("Foydalanuvchi mavjud");
-    }
-    const activationLink = uuidv4();
-
-    const newUser = await this.prismaService.user.create({
-      data: { ...dto, activationLink },
-    });
-    await this.mailService.sendMail(
-      {
-        email: dto.email,
-        name: dto.full_name,
-        activation_link: activationLink,
-      },
-      "user"
-    );
-    return { message: "Emailga tasdiqlash linki yuborildi" };
-  }
-
-  async activateUser(activationLink: string) {
-    const user = await this.prismaService.user.findFirst({
-      where: { activationLink },
-    });
-
-    if (!user) {
-      throw new BadRequestException("Noto‘g‘ri tasdiqlash havolasi");
-    }
-
-    await this.prismaService.user.update({
-      where: { id: user.id },
-      data: { isActivated: true },
-    });
-
-    return { message: "Profil muvaffaqiyatli faollashtirildi" };
-  }
-
-  async loginUser(email: string) {
-    const user = await this.prismaService.user.findFirst({ where: { email } });
-
-    if (!user || !user.isActivated) {
-      throw new UnauthorizedException(
-        "Foydalanuvchi topilmadi yoki tasdiqlanmagan"
-      );
-    }
-
-    const tokens = await this.generateToken(user);
-
-    return { ...tokens, user };
-  }
-
-  async refresh(refreshToken: string) {
-    if(!refreshToken){
-      throw new ForbiddenException("Refresh token mavjud emas")
-    }
-    const userData=this.jwtService.decode(refreshToken);
-    const users=await this.prismaService.user.findUnique({where:{id:userData['id']}})
-    const tokens=await this.generateToken(users);
-    return {...tokens, user:users}
-
-  }
-
-  //admin
-  async login(email: string) {
-    const admin = await this.prismaService.admin.findFirst({
-      where: { email },
-    });
-
-    if (!admin) {
-      throw new NotFoundException("Admin topilmadi");
-    }
-
-    // Email orqali tasdiqlash yoki boshqa logika bo'lishi mumkin
-
-    const payload = {
-      sub: admin.id,
-      role: "admin",
-    };
-
-    const access_token = this.jwtService.sign(payload);
-
-    return {
-      message: "Kirish muvaffaqiyatli",
-      access_token,
-      admin: {
-        id: admin.id,
-        full_name: admin.full_name,
-        email: admin.email,
-        phone: admin.phone,
-      },
-    };
-  }
-
-  async generateToken(user: User) {
-    const payload = {
+  async generateToken(user: User): Promise<Tokens> {
+    const payload: JwtPayload = {
       id: user.id,
       email: user.email,
+      isActivated: user.isActivated,
     };
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(payload, {
@@ -137,33 +43,139 @@ export class AuthService {
     return { accessToken, refreshToken };
   }
 
-  async activate(activationLink: string) {
-    const user = await this.prismaService.user.findFirst({
-      where: { activationLink: activationLink },
+  async signup(createUserDto: CreateUserDto) {
+    const { email, full_name } = createUserDto;
+    const candidate = await this.prismaService.user.findFirst({
+      where: { email },
     });
-
-    if (!user) {
-      throw new UnauthorizedException("Noto'g'ri activation link");
+    if (candidate) {
+      throw new ConflictException("Bunday email mavjud boshqa email kiriting");
     }
-
+    const activationLink = uuidv4();
+    const newUser = await this.prismaService.user.create({
+      data: {
+        email,
+        full_name,
+        activationLink: activationLink,
+        isActivated: false,
+      },
+    });
+    // Emailga kod yuborish
+    await this.mailService.sendMail({
+      email,
+      full_name: newUser.full_name,
+      isActivated: activationLink,
+    });
+    return {
+      message: "Yangi user qo'shildi. Emailga tasdiqlash kodi yuborildi!",
+      userId: newUser.id,
+    };
+  }
+  async activateUser(link: string) {
+    const user = await this.prismaService.user.findFirst({
+      where: { activationLink: link },
+    });
+    if (!user) {
+      throw new UnauthorizedException("Link noto'g'ri");
+    }
     if (user.isActivated) {
-      return {
-        message: "Foydalanuvchi allaqachon faollashtirilgan",
-        isActive: true,
-      };
+      return { message: "Hisob allaqachon faollashtirilgan" };
     }
 
     await this.prismaService.user.update({
       where: { id: user.id },
-      data: {
-        isActivated: true,
-        activationLink: null,
-      },
+      data: { isActivated: true },
+    });
+    return { message: "Hisob faollashtirildi" };
+  }
+
+  async signin(email: string) {
+    const user = await this.prismaService.user.findFirst({ where: { email } });
+    if (!user) {
+      throw new UnauthorizedException("Bunday email mavjud emas");
+    }
+    if (!user.isActivated) {
+      throw new UnauthorizedException("Hisob faollashtirilmagan");
+    }
+    const tokens = await this.generateToken(user);
+    await this.prismaService.user.update({
+      where: { id: user.id },
+      data: { hashedRefreshToken: tokens.refreshToken },
+    });
+    return {
+      message: "Kirish muvaffaqiyatli",
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+    };
+  }
+
+  // User login (faqat email va activationLink orqali)
+  async userLogin(email: string, activationLink: string) {
+    const user = await this.prismaService.user.findFirst({
+      where: { email, activationLink },
+    });
+    if (!user) {
+      throw new UnauthorizedException(
+        "Email yoki aktivatsiya havolasi noto‘g‘ri"
+      );
+    }
+    if (!user.isActivated) {
+      throw new UnauthorizedException("Hisob faollashtirilmagan");
+    }
+    const tokens = await this.generateToken(user);
+    await this.prismaService.user.update({
+      where: { id: user.id },
+      data: { hashedRefreshToken: tokens.refreshToken },
+    });
+    return {
+      message: "Kirish muvaffaqiyatli",
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+    };
+  }
+
+  // ADMIN uchun
+
+  async generateAdminToken(admin: Admin) {
+    const payload = {
+      id: admin.id,
+      email: admin.email,
+      is_creator: admin.is_creator,
+      role: "admin",
+    };
+
+    const [accessToken, refreshToken] = await Promise.all([
+      this.jwtService.signAsync(payload, {
+        secret: process.env.ACCESS_TOKEN_KEY,
+        expiresIn: process.env.ACCESS_TOKEN_TIME,
+      }),
+      this.jwtService.signAsync(payload, {
+        secret: process.env.REFRESH_TOKEN_KEY,
+        expiresIn: process.env.REFRESH_TOKEN_TIME,
+      }),
+    ]);
+
+    return { accessToken, refreshToken };
+  }
+
+  async adminLogin(dto: AdminLoginDto) {
+    const admin = await this.prismaService.admin.findFirst({
+      where: { email: dto.email },
     });
 
+    if (!admin) {
+      throw new UnauthorizedException("Email yoki parol noto‘g‘ri");
+    }
+
+    const isMatch = await bcrypt.compare(dto.password, admin.password);
+    if (!isMatch) {
+      throw new UnauthorizedException("Email yoki parol noto‘g‘ri");
+    }
+
+    const tokens = await this.generateAdminToken(admin);
     return {
-      message: "Foydalanuvchi muvaffaqiyatli faollashtirildi!",
-      isActivated: true,
+      message: "Admin muvaffaqiyatli tizimga kirdi",
+      tokens,
     };
   }
 }

@@ -119,9 +119,8 @@ model CarAccident {
 model User {
   id                  Int       @id @default(autoincrement())
   full_name           String
-  phone               String
+  phone               String?
   email               String
-  hashedPassword      String
   isActivated         Boolean   @default(false)
   activationLink      String?
   is_approved         Boolean   @default(false)
