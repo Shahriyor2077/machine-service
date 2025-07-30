@@ -35,7 +35,7 @@ model Admin {
 model District {
   id       Int      @id @default(autoincrement())
   name     String
-  regional Int
+  regionId Int
   regions  Region[]
   firms    Firm[]
 

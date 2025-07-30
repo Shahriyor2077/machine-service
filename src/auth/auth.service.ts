@@ -136,6 +136,7 @@ export class AuthService {
 
   // ADMIN uchun
 
+  
   async generateAdminToken(admin: Admin) {
     const payload = {
       id: admin.id,
